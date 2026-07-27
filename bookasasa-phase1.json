@@ -1,0 +1,173 @@
+{
+  "name": "BookaSasa Phase 1 - WhatsApp booking",
+  "active": false,
+  "nodes": [
+    {
+      "id": "node-1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 50],
+      "parameters": {
+        "notes": "Receive WhatsApp booking requests, normalize the payload, extract intent with OpenRouter, create a pending appointment, and confirm the booking." 
+      }
+    },
+    {
+      "id": "node-2",
+      "name": "WhatsApp Trigger",
+      "type": "n8n-nodes-base.whatsappTrigger",
+      "typeVersion": 1,
+      "position": [100, 220],
+      "parameters": {
+        "event": "message"
+      }
+    },
+    {
+      "id": "node-3",
+      "name": "Normalize inbound payload",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [320, 220],
+      "parameters": {
+        "functionCode": "const incoming = items[0].json;\nconst phone = incoming?.from || incoming?.sender || incoming?.phoneNumber || incoming?.payload?.sender?.phone || null;\nconst message_text = incoming?.message?.text || incoming?.message || incoming?.body || incoming?.text || '';\nconst timestamp = incoming?.timestamp || new Date().toISOString();\nreturn [{ json: { channel: 'whatsapp', phone, message_text, timestamp, raw: incoming } }];"
+      }
+    },
+    {
+      "id": "node-4",
+      "name": "Upsert User",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [540, 220],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO users (id, phone, preferred_channel, preferred_language, is_visually_impaired, full_name, created_at) VALUES (gen_random_uuid(), '{{ $json.phone }}', 'whatsapp', 'unknown', false, NULL, now()) ON CONFLICT (phone) DO UPDATE SET preferred_channel = 'whatsapp' RETURNING id, phone, preferred_language;"
+      }
+    },
+    {
+      "id": "node-5",
+      "name": "OpenRouter Intent extraction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [760, 220],
+      "parameters": {
+        "url": "https://api.openrouter.ai/v1/chat/completions",
+        "method": "POST",
+        "responseFormat": "json",
+        "jsonParameters": true,
+        "options": {
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.OPENROUTER_API_KEY ? 'Bearer ' + $env.OPENROUTER_API_KEY : 'Bearer YOUR_OPENROUTER_API_KEY' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "bodyParametersJson": "={\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"system\",\"content\":\"Return ONLY valid JSON with intent, service, date_text, missing_fields.\"},{\"role\":\"user\",\"content\":\"{{ $json.message_text }}\"}],\"temperature\":0}"
+      }
+    },
+    {
+      "id": "node-6",
+      "name": "Parse OpenRouter response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [980, 220],
+      "parameters": {
+        "functionCode": "const raw = items[0].json?.choices?.[0]?.message?.content || items[0].json?.body || '';\nlet parsed = null;\ntry { parsed = JSON.parse(raw.trim()); } catch (error) { parsed = { intent: 'unknown', service: null, date_text: null, missing_fields: ['intent','service','date_text','time_pref'], raw_response: raw }; }\nreturn [{ json: { ...items[0].json, raw_openrouter: raw, intent: parsed.intent, service: parsed.service, date_text: parsed.date_text, missing_fields: parsed.missing_fields || [], parsed_json: parsed } }];"
+      }
+    },
+    {
+      "id": "node-7",
+      "name": "Create appointment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [1200, 220],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH provider AS (SELECT id, available_slots FROM service_providers WHERE service_type = '{{ $json.service }}' LIMIT 1) INSERT INTO appointments (user_id, provider_id, service_type, slot_time, status, created_at) SELECT '{{ $node[\"Upsert User\"].json.id }}'::uuid, provider.id, '{{ $json.service }}', (provider.available_slots->0->>'date')::text || ' ' || (provider.available_slots->0->'times'->>0), 'pending', now() FROM provider RETURNING id, user_id, provider_id, service_type, slot_time, status;"
+      }
+    },
+    {
+      "id": "node-8",
+      "name": "WhatsApp confirmation",
+      "type": "n8n-nodes-base.whatsapp",
+      "typeVersion": 1,
+      "position": [1420, 220],
+      "parameters": {
+        "text": "={{ 'Appointment saved for ' + $json.service + ' on ' + $json.date_text + '. Please confirm if needed.' }}"
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize inbound payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize inbound payload": {
+      "main": [
+        [
+          {
+            "node": "Upsert User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert User": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter Intent extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Intent extraction": {
+      "main": [
+        [
+          {
+            "node": "Parse OpenRouter response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse OpenRouter response": {
+      "main": [
+        [
+          {
+            "node": "Create appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create appointment": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}

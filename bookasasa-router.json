@@ -1,0 +1,80 @@
+{
+  "name": "BookaSasa Router",
+  "active": false,
+  "nodes": [
+    {
+      "id": "node-1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 50],
+      "parameters": {
+        "notes": "Route inbound requests to the correct booking workflow based on the source channel." 
+      }
+    },
+    {
+      "id": "node-2",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 220],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "booka-route"
+      }
+    },
+    {
+      "id": "node-3",
+      "name": "Set channel",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [320, 220],
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "channel",
+              "value": "={{ $json.channel || 'web' }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-4",
+      "name": "Route by channel",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [540, 220],
+      "parameters": {
+        "mode": "expression",
+        "expression": "={{ $json.channel }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set channel": {
+      "main": [
+        [
+          {
+            "node": "Route by channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}

@@ -1,0 +1,79 @@
+{
+  "name": "BookaSasa Phase 3 - Reminder workflow",
+  "active": false,
+  "nodes": [
+    {
+      "id": "node-1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [250, 50],
+      "parameters": {
+        "notes": "Run every hour, find pending appointments, and send reminder messages to users before their booked time." 
+      }
+    },
+    {
+      "id": "node-2",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [100, 220],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-3",
+      "name": "Find pending reminders",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [320, 220],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT a.id, a.slot_time, u.phone, u.preferred_channel FROM appointments a JOIN users u ON u.id = a.user_id WHERE a.status = 'pending' AND a.reminder_sent = false AND a.slot_time > now();"
+      }
+    },
+    {
+      "id": "node-4",
+      "name": "Send reminder",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [540, 220],
+      "parameters": {
+        "functionCode": "return items;"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Find pending reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find pending reminders": {
+      "main": [
+        [
+          {
+            "node": "Send reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}
